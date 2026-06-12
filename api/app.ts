@@ -14,6 +14,7 @@ import paymentsRoutes from './routes/payments.js'
 import groupingsRoutes from './routes/groupings.js'
 import withdrawalsRoutes from './routes/withdrawals.js'
 import logsRoutes from './routes/logs.js'
+import waitlistRoutes from './routes/waitlist.js'
 import { initDb } from './db.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -38,6 +39,7 @@ app.use('/api/payments', paymentsRoutes)
 app.use('/api/groupings', groupingsRoutes)
 app.use('/api/withdrawals', withdrawalsRoutes)
 app.use('/api/logs', logsRoutes)
+app.use('/api', waitlistRoutes)
 
 app.use(
   '/api/health',

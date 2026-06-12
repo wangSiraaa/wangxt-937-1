@@ -8,7 +8,7 @@ router.get('/', async (_req: Request, res: Response): Promise<void> => {
     const db = getDb()
     const result = db.exec('SELECT * FROM events ORDER BY id')
     const rows = result[0]?.values?.map(v => ({
-      id: v[0], name: v[1], category: v[2], description: v[3]
+      id: v[0], name: v[1], category: v[2], description: v[3], fee: v[4] || 100
     })) ?? []
     res.json({ success: true, data: rows })
   } catch (err: any) {

@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
-  description TEXT
+  description TEXT,
+  fee REAL DEFAULT 100
 );
 
 CREATE TABLE IF NOT EXISTS age_rules (
@@ -120,15 +121,92 @@ CREATE TABLE IF NOT EXISTS operation_logs (
   detail TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS waitlist_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL,
+  age_group TEXT NOT NULL,
+  registration_id INTEGER NOT NULL,
+  queue_order INTEGER NOT NULL,
+  status TEXT DEFAULT 'waiting' CHECK(status IN ('waiting','promoted','cancelled','expired')),
+  payment_time TEXT,
+  promoted_at TEXT,
+  cancelled_at TEXT,
+  source_registration_id INTEGER,
+  note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (event_id) REFERENCES events(id),
+  FOREIGN KEY (registration_id) REFERENCES registrations(id)
+);
+
+CREATE TABLE IF NOT EXISTS project_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration_id INTEGER NOT NULL,
+  original_event_id INTEGER NOT NULL,
+  target_event_id INTEGER NOT NULL,
+  original_age_group TEXT NOT NULL,
+  target_age_group TEXT NOT NULL,
+  fee_difference REAL NOT NULL,
+  difference_status TEXT DEFAULT 'unpaid' CHECK(difference_status IN ('unpaid','paid','waived','refunded')),
+  paid_at TEXT,
+  change_status TEXT DEFAULT 'pending' CHECK(change_status IN ('pending','approved','rejected','cancelled')),
+  id_number_verified INTEGER DEFAULT 0,
+  age_verified INTEGER DEFAULT 0,
+  proof_verified INTEGER DEFAULT 0,
+  rejection_reason TEXT,
+  approved_at TEXT,
+  requester_note TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (registration_id) REFERENCES registrations(id),
+  FOREIGN KEY (original_event_id) REFERENCES events(id),
+  FOREIGN KEY (target_event_id) REFERENCES events(id)
+);
+
+CREATE TABLE IF NOT EXISTS waitlist_promotion_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL,
+  age_group TEXT NOT NULL,
+  group_id INTEGER,
+  vacated_slot_number INTEGER,
+  vacated_registration_id INTEGER,
+  vacated_reason TEXT,
+  promoted_registration_id INTEGER,
+  promotion_order INTEGER,
+  queued_waitlist_entry_id INTEGER,
+  promoted_assignment_id INTEGER,
+  status TEXT DEFAULT 'success' CHECK(status IN ('success','failed','skipped')),
+  failure_reason TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (event_id) REFERENCES events(id),
+  FOREIGN KEY (group_id) REFERENCES groups(id)
+);
+
+CREATE TABLE IF NOT EXISTS payment_adjustments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration_id INTEGER NOT NULL,
+  project_change_id INTEGER,
+  original_amount REAL NOT NULL,
+  new_amount REAL NOT NULL,
+  difference REAL NOT NULL,
+  adjustment_type TEXT CHECK(adjustment_type IN ('supplement','refund')),
+  finance_confirmed INTEGER DEFAULT 0,
+  confirmed_by TEXT,
+  confirmed_at TEXT,
+  payment_reference TEXT,
+  status TEXT DEFAULT 'pending' CHECK(status IN ('pending','confirmed','cancelled')),
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (registration_id) REFERENCES registrations(id),
+  FOREIGN KEY (project_change_id) REFERENCES project_changes(id)
+);
 `
 
 function seedData(d: Database): void {
   const eventCount = d.exec('SELECT COUNT(*) FROM events')[0]?.values[0]?.[0] as number
   if (eventCount > 0) return
 
-  d.run(`INSERT INTO events (name, category, description) VALUES ('男子100米', 'track', '男子100米短跑')`)
-  d.run(`INSERT INTO events (name, category, description) VALUES ('女子200米', 'track', '女子200米短跑')`)
-  d.run(`INSERT INTO events (name, category, description) VALUES ('混合接力', 'relay', '男女混合4x100米接力')`)
+  d.run(`INSERT INTO events (name, category, description, fee) VALUES ('男子100米', 'track', '男子100米短跑', 100)`)
+  d.run(`INSERT INTO events (name, category, description, fee) VALUES ('女子200米', 'track', '女子200米短跑', 150)`)
+  d.run(`INSERT INTO events (name, category, description, fee) VALUES ('混合接力', 'relay', '男女混合4x100米接力', 200)`)
 
   d.run(`INSERT INTO age_rules (event_id, group_name, min_age, max_age) VALUES (1, 'U18', 12, 17)`)
   d.run(`INSERT INTO age_rules (event_id, group_name, min_age, max_age) VALUES (1, 'U23', 18, 22)`)

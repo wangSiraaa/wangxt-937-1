@@ -15,6 +15,7 @@ export interface Event {
   name: string;
   category: string;
   description: string;
+  fee: number;
 }
 
 export interface AgeRule {
@@ -85,6 +86,98 @@ export interface Withdrawal {
   approved_at: string | null;
 }
 
+export interface WaitlistEntry {
+  id: number;
+  event_id: number;
+  age_group: string;
+  registration_id: number;
+  queue_order: number;
+  status: string;
+  payment_time: string | null;
+  promoted_at: string | null;
+  cancelled_at: string | null;
+  note: string | null;
+  created_at: string;
+  player_name?: string;
+  id_number?: string;
+  phone?: string;
+  birth_year?: number;
+  event_name?: string;
+}
+
+export interface ProjectChange {
+  id: number;
+  registration_id: number;
+  original_event_id: number;
+  target_event_id: number;
+  original_age_group: string;
+  target_age_group: string;
+  fee_difference: number;
+  difference_status: string;
+  paid_at: string | null;
+  change_status: string;
+  id_number_verified: boolean;
+  age_verified: boolean;
+  proof_verified: boolean;
+  rejection_reason: string | null;
+  approved_at: string | null;
+  requester_note: string | null;
+  created_at: string;
+  player_name?: string;
+  id_number?: string;
+  orig_event_name?: string;
+  target_event_name?: string;
+  verification_passed?: boolean;
+  verification_errors?: string[];
+  needs_finance_confirm?: boolean;
+  payment_adjustment?: { id: number; difference: number; adjustment_type: string; status: string } | null;
+}
+
+export interface PromotionLog {
+  id: number;
+  event_id: number;
+  age_group: string;
+  group_id: number | null;
+  vacated_slot_number: number | null;
+  vacated_registration_id: number | null;
+  vacated_reason: string | null;
+  promoted_registration_id: number | null;
+  promotion_order: number | null;
+  queued_waitlist_entry_id: number | null;
+  promoted_assignment_id: number | null;
+  status: string;
+  failure_reason: string | null;
+  created_at: string;
+  event_name?: string;
+  group_name?: string;
+  vacated_name?: string;
+  promoted_name?: string;
+  queue_order?: number;
+}
+
+export interface PaymentAdjustment {
+  id: number;
+  registration_id: number;
+  project_change_id: number | null;
+  original_amount: number;
+  new_amount: number;
+  difference: number;
+  adjustment_type: string;
+  finance_confirmed: boolean;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  payment_reference: string | null;
+  status: string;
+  created_at: string;
+  player_name?: string;
+  original_event?: string;
+  original_event_id?: number;
+  target_event_id?: number;
+  original_age_group?: string;
+  target_age_group?: string;
+  target_event?: string;
+}
+
 interface AppState {
   events: Event[];
   registrations: Registration[];
@@ -96,6 +189,10 @@ interface AppState {
   eligiblePlayers: Registration[];
   loading: boolean;
   error: ApiError | null;
+  waitlistEntries: WaitlistEntry[];
+  projectChanges: ProjectChange[];
+  promotionLogs: PromotionLog[];
+  paymentAdjustments: PaymentAdjustment[];
 
   setError: (error: ApiError | null) => void;
 
@@ -121,6 +218,18 @@ interface AppState {
     reason: string;
   }) => Promise<void>;
   approveWithdrawal: (id: number) => Promise<void>;
+
+  fetchWaitlist: (eventId?: number, ageGroup?: string) => Promise<void>;
+  addWaitlistEntry: (registrationId: number) => Promise<WaitlistEntry>;
+  requestProjectChange: (registrationId: number, targetEventId: number, requesterNote?: string) => Promise<ProjectChange>;
+  fetchProjectChanges: () => Promise<void>;
+  confirmProjectChangeFee: (changeId: number, confirmedBy?: string, paymentRef?: string) => Promise<void>;
+  promoteWaitlist: (eventId: number) => Promise<{ promoted: any[]; skipped: any[] }>;
+  executeWithdrawalAndPromote: (registrationId: number, groupId: number, reason?: string) => Promise<any>;
+  fetchPromotionLogs: () => Promise<void>;
+  fetchPaymentAdjustments: () => Promise<void>;
+  confirmPaymentAdjustment: (adjId: number, confirmedBy?: string, paymentRef?: string) => Promise<void>;
+  checkAssignEligibility: (groupId: number, registrationIds: number[]) => Promise<{ eligible: any[]; ineligible: any[]; can_assign: boolean }>;
 }
 
 async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
@@ -147,6 +256,12 @@ export const useStore = create<AppState>((set, get) => ({
   eligiblePlayers: [],
   loading: false,
   error: null,
+  waitlistEntries: [],
+  projectChanges: [],
+  promotionLogs: [],
+  paymentAdjustments: [],
+
+  setError: (error) => set({ error }),
 
   fetchEvents: async () => {
     try {
@@ -385,6 +500,197 @@ export const useStore = create<AppState>((set, get) => ({
       set({ loading: false });
     } catch (e: any) {
       set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  fetchWaitlist: async (eventId, ageGroup) => {
+    try {
+      let url = "/api/waitlist";
+      const qs: string[] = [];
+      if (eventId) qs.push(`event_id=${eventId}`);
+      if (ageGroup) qs.push(`age_group=${encodeURIComponent(ageGroup)}`);
+      if (qs.length) url += `?${qs.join("&")}`;
+      const data = await apiFetch<WaitlistEntry[]>(url);
+      set({ waitlistEntries: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  addWaitlistEntry: async (registrationId) => {
+    set({ loading: true, error: null });
+    try {
+      const regRes = await apiFetch<Registration[]>(`/api/registrations?id=${registrationId}`);
+      const reg = regRes.length > 0 ? regRes[0] : null;
+      if (!reg) throw new Error("Registration not found");
+      const res = await apiFetch<WaitlistEntry>("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_id: reg.event_id,
+          age_group: reg.age_group,
+          registration_id: registrationId,
+        }),
+      });
+      set({ loading: false });
+      await get().fetchWaitlist();
+      return res;
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  requestProjectChange: async (registrationId, targetEventId, requesterNote) => {
+    set({ loading: true, error: null });
+    try {
+      const res = await apiFetch<ProjectChange>("/api/project-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registration_id: registrationId,
+          target_event_id: targetEventId,
+          requester_note: requesterNote,
+        }),
+      });
+      set({ loading: false });
+      await get().fetchProjectChanges();
+      await get().fetchRegistrations();
+      return res;
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  fetchProjectChanges: async () => {
+    try {
+      const data = await apiFetch<ProjectChange[]>("/api/project-changes");
+      set({ projectChanges: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  confirmProjectChangeFee: async (changeId, confirmedBy, paymentRef) => {
+    set({ loading: true, error: null });
+    try {
+      await apiFetch(`/api/project-change/${changeId}/confirm-fee`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmed_by: confirmedBy, payment_reference: paymentRef }),
+      });
+      await get().fetchProjectChanges();
+      await get().fetchPaymentAdjustments();
+      await get().fetchRegistrations();
+      set({ loading: false });
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  promoteWaitlist: async (eventId) => {
+    set({ loading: true, error: null });
+    try {
+      const allPromoted: any[] = [];
+      const allSkipped: any[] = [];
+      for (const ag of ["U18", "U23", "Open"]) {
+        try {
+          const res = await apiFetch<any>("/api/promote-waitlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ event_id: eventId, age_group: ag }),
+          });
+          if (res.promoted) allPromoted.push(...res.promoted);
+          if (res.skipped) allSkipped.push(...res.skipped);
+        } catch {}
+      }
+      await get().fetchWaitlist(eventId);
+      await get().fetchAllGroups(eventId);
+      await get().fetchPublishedGroups(eventId);
+      await get().fetchPromotionLogs();
+      set({ loading: false });
+      return { promoted: allPromoted, skipped: allSkipped };
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  executeWithdrawalAndPromote: async (registrationId, groupId, reason) => {
+    set({ loading: true, error: null });
+    try {
+      const res = await apiFetch<any>("/api/withdrawal-and-promote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registration_id: registrationId,
+          group_id: groupId,
+          reason: reason,
+        }),
+      });
+      await get().fetchWithdrawals();
+      await get().fetchAllGroups();
+      await get().fetchPublishedGroups();
+      await get().fetchWaitlist();
+      await get().fetchPromotionLogs();
+      await get().fetchRegistrations();
+      set({ loading: false });
+      return res;
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  fetchPromotionLogs: async () => {
+    try {
+      const data = await apiFetch<PromotionLog[]>("/api/promotion-logs");
+      set({ promotionLogs: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  fetchPaymentAdjustments: async () => {
+    try {
+      const data = await apiFetch<PaymentAdjustment[]>("/api/payment-adjustments");
+      set({ paymentAdjustments: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  confirmPaymentAdjustment: async (adjId, confirmedBy, paymentRef) => {
+    set({ loading: true, error: null });
+    try {
+      await apiFetch(`/api/payment-adjustments/${adjId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmed_by: confirmedBy, payment_reference: paymentRef }),
+      });
+      await get().fetchPaymentAdjustments();
+      await get().fetchProjectChanges();
+      await get().fetchRegistrations();
+      set({ loading: false });
+    } catch (e: any) {
+      set({ error: e.message, loading: false });
+      throw e;
+    }
+  },
+
+  checkAssignEligibility: async (groupId, registrationIds) => {
+    try {
+      const res = await apiFetch<any>("/api/grouping/check-assign-eligibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ registration_ids: registrationIds, group_id: groupId }),
+      });
+      return { eligible: res.eligible || [], ineligible: res.ineligible || [], can_assign: res.can_assign };
+    } catch (e: any) {
+      set({ error: e.message });
       throw e;
     }
   },
