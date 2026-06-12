@@ -1,5 +1,15 @@
 import { create } from "zustand";
 
+export interface ApiError extends Error {
+  details?: string[];
+}
+
+function makeError(msg: string, details?: string[]): ApiError {
+  const e = new Error(msg) as ApiError;
+  if (details) e.details = details;
+  return e;
+}
+
 export interface Event {
   id: number;
   name: string;
@@ -85,7 +95,9 @@ interface AppState {
   withdrawals: Withdrawal[];
   eligiblePlayers: Registration[];
   loading: boolean;
-  error: string | null;
+  error: ApiError | null;
+
+  setError: (error: ApiError | null) => void;
 
   fetchEvents: () => Promise<void>;
   fetchRegistrations: () => Promise<void>;
@@ -115,7 +127,11 @@ async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, options);
   const body = await res.json().catch(() => ({ error: res.statusText }));
   if (!res.ok) {
-    throw new Error(body.error || body.message || `请求失败: ${res.status}`);
+    const err = new Error(body.error || body.message || `请求失败: ${res.status}`) as ApiError;
+    if (body.details) {
+      err.details = body.details;
+    }
+    throw err;
   }
   return body.data as T;
 }
@@ -137,7 +153,7 @@ export const useStore = create<AppState>((set, get) => ({
       const data = await apiFetch<Event[]>("/api/events");
       set({ events: data });
     } catch (e: any) {
-      set({ error: e.message });
+      set({ error: makeError(e.message, e.details) });
     }
   },
 
@@ -146,7 +162,7 @@ export const useStore = create<AppState>((set, get) => ({
       const data = await apiFetch<Registration[]>("/api/registrations");
       set({ registrations: data });
     } catch (e: any) {
-      set({ error: e.message });
+      set({ error: makeError(e.message, e.details) });
     }
   },
 
